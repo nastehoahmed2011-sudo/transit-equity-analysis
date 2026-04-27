@@ -1,0 +1,173 @@
+########################################################
+# ACCESSING MOBILITY & TRANSPORT EQUITY ANALYSIS
+# Author: Nasteho Ahmed
+# Data: CleanData (Numbers export)
+########################################################
+
+# -----------------------------
+# 1. LOAD LIBRARIES
+# -----------------------------
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+library(tidyverse)
+library(MASS)
+library(caret)
+
+# -----------------------------
+# 2. LOAD DATA (NUMBERS EXPORT)
+# -----------------------------
+walkdata <- read_csv("finalcleanwalk.csv")  
+# If still Numbers export, convert first to CSV
+
+# -----------------------------
+# 3. CLEAN COLUMN NAMES
+# -----------------------------
+colnames(walkdata) <- gsub("[, ]", "", colnames(walkdata))
+
+# -----------------------------
+# 4. CLEAN DATA TYPES
+# -----------------------------
+walkdata <- walkdata %>%
+  mutate(
+    AGE = as.numeric(AGE),
+    ZINC2 = as.numeric(ZINC2),
+    RACE = as.factor(RACE),
+    METRO3 = as.factor(METRO3),
+    WBBIKELANE = as.factor(WBBIKELANE),
+    WBBIKEWALK = as.character(WBBIKEWALK)
+  )
+
+# -----------------------------
+# 5. CREATE DEPENDENT VARIABLE
+# -----------------------------
+walkdata <- walkdata %>%
+  mutate(
+    walkbikedummy = ifelse(WBBIKEWALK %in% c("1","2","3"), 1, 0)
+  )
+
+table(walkdata$walkbikedummy)
+
+# -----------------------------
+# 6. CREATE AGE GROUPS
+# -----------------------------
+walkdata <- walkdata %>%
+  mutate(AgeGroup = case_when(
+    AGE < 15 ~ "0-14",
+    AGE < 30 ~ "15-29",
+    AGE < 45 ~ "30-44",
+    AGE < 60 ~ "45-59",
+    AGE < 75 ~ "60-74",
+    TRUE ~ "75+"
+  ))
+
+# -----------------------------
+# 7. DESCRIPTIVE ANALYSIS
+# -----------------------------
+
+# Race distribution
+ggplot(walkdata, aes(x = RACE)) +
+  geom_bar(fill = "steelblue") +
+  theme_minimal()
+
+# Age distribution
+ggplot(walkdata, aes(x = AgeGroup)) +
+  geom_bar(fill = "darkgreen") +
+  theme_minimal()
+
+# -----------------------------
+# 8. DISPROPORTIONALITY INDEX
+# -----------------------------
+disprop <- walkdata %>%
+  group_by(RACE) %>%
+  summarise(
+    total = n(),
+    walkers = sum(walkbikedummy, na.rm = TRUE),
+    observed = walkers / sum(walkers),
+    expected = total / nrow(walkdata),
+    index = observed / expected
+  )
+
+ggplot(disprop, aes(x = RACE, y = index)) +
+  geom_bar(stat = "identity", fill = "purple") +
+  theme_minimal()
+
+# -----------------------------
+# 9. BASELINE LOGISTIC MODEL
+# -----------------------------
+model1 <- glm(
+  walkbikedummy ~ AGE + ZINC2 + RACE + METRO3,
+  data = walkdata,
+  family = binomial
+)
+
+summary(model1)
+AIC(model1)
+
+# -----------------------------
+# 10. INTERACTION MODELS
+# -----------------------------
+
+# Race x income
+model2 <- glm(
+  walkbikedummy ~ AGE + ZINC2 * RACE + METRO3,
+  data = walkdata,
+  family = binomial
+)
+
+summary(model2)
+
+# Metro x income
+model3 <- glm(
+  walkbikedummy ~ AGE + ZINC2 * METRO3 + RACE,
+  data = walkdata,
+  family = binomial
+)
+
+summary(model3)
+
+# Bike lane effects
+model4 <- glm(
+  walkbikedummy ~ AGE + ZINC2 * WBBIKELANE + RACE + METRO3,
+  data = walkdata,
+  family = binomial
+)
+
+summary(model4)
+
+# -----------------------------
+# 11. PREDICTIONS
+# -----------------------------
+walkdata$predicted_prob <- predict(model1, type = "response")
+
+walkdata$pred_class <- ifelse(walkdata$predicted_prob > 0.5, 1, 0)
+
+head(walkdata$predicted_prob)
+
+# Example individual prediction
+new_person <- data.frame(
+  AGE = 62,
+  ZINC2 = 16021,
+  RACE = "01",
+  METRO3 = "3"
+)
+
+predict(model1, newdata = new_person, type = "response")
+
+# -----------------------------
+# 12. MODEL COMPARISON
+# -----------------------------
+AIC(model1, model2, model3, model4)
+
+# -----------------------------
+# 13. VISUALIZATION OF PREDICTIONS
+# -----------------------------
+ggplot(walkdata, aes(x = AGE, y = predicted_prob)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth() +
+  theme_minimal()
+
+# -----------------------------
+# END OF ANALYSIS
+# -----------------------------
